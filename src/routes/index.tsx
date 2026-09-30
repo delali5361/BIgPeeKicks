@@ -132,13 +132,13 @@ function Index() {
             <p className="mt-5 text-muted-foreground">
              What started as a passion for quality footwear grew into a brand built on style, confidence, and trust. Big Pee Kicks was created with a simple vision: to make great footwear accessible to people who appreciate quality, comfort, and a look that speaks for itself.
 
-Every pair is carefully selected and inspected from the stitching and materials to the box and insole. Nothing makes it onto the shelf without meeting the standard. Whether it’s a fresh pair of sneakers, a classic shoe, or a comfortable pair of slippers, every product is chosen with the customer in mind.
+             Every pair is carefully selected and inspected from the stitching and materials to the box and insole. Nothing makes it onto the shelf without meeting the standard. Whether it’s a fresh pair of sneakers, a classic shoe, or a comfortable pair of slippers, every product is chosen with the customer in mind.
 
-At Big Pee, footwear is more than just something you wear. It’s part of your everyday style, your confidence, and the way you show up. That’s why we’re committed to offering pieces that combine quality, comfort, and personality.
+             At Big Pee, footwear is more than just something you wear. It’s part of your everyday style, your confidence, and the way you show up. That’s why we’re committed to offering pieces that combine quality, comfort, and personality.
 
-From everyday essentials to standout pairs, Big Pee is here to help you step out looking good and feeling confident. Every pair has a purpose, every customer matters, and every purchase is a reflection of the standard we stand by.
+             From everyday essentials to standout pairs, Big Pee is here to help you step out looking good and feeling confident. Every pair has a purpose, every customer matters, and every purchase is a reflection of the standard we stand by.
 
-Big Pee Step In. Stand Out.
+             Big Pee Step In. Stand Out.
 
             </p>
             <div className="mt-8 grid grid-cols-3 gap-4">
