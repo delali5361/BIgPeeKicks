@@ -178,7 +178,7 @@ begin
       when 'string' then quote_nullable(parameter_value #>> '{}')
       else parameter_value::text
     end;
-    rendered_query := regexp_replace(rendered_query, '\$' || parameter_index::text || '\m', parameter_literal, 'g');
+    rendered_query := regexp_replace(rendered_query, '\$' || parameter_index::text || '\M', parameter_literal, 'g');
     parameter_index := parameter_index - 1;
   end loop;
 
