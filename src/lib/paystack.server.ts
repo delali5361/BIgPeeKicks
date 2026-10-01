@@ -26,10 +26,10 @@ export async function initializePaystackPayment(input: {
   return result.data;
 }
 
-export async function verifyPaystackPayment(reference: string): Promise<boolean> {
+export async function verifyPaystackPayment(reference: string, expectedAmount: number): Promise<boolean> {
   const secretKey = process.env["PAYSTACK_SECRET_KEY"];
   if (!secretKey) throw new Error("PAYSTACK_SECRET_KEY is not configured");
   const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, { headers: { Authorization: `Bearer ${secretKey}` } });
-  const result = await response.json() as { status: boolean; data?: { status?: string } };
-  return response.ok && result.status && result.data?.status === "success";
+  const result = await response.json() as { status: boolean; data?: { status?: string; reference?: string; amount?: number; currency?: string } };
+  return response.ok && result.status && result.data?.status === "success" && result.data.reference === reference && result.data.amount === toPesewas(expectedAmount) && result.data.currency === "GHS";
 }

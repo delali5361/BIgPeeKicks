@@ -1,4 +1,10 @@
 {
   "installCommand": "pnpm install",
-  "buildCommand": "pnpm build"
+  "buildCommand": "pnpm build",
+  "crons": [
+    {
+      "path": "/api/cron/release-stock-reservations",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }

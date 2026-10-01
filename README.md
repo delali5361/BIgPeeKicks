@@ -82,9 +82,13 @@ The schema creates the tables, indexes, the restricted `execute_app_sql` functio
 
 Use `supabase/schema.sql` for Supabase. The files in `database/migrations/` are SQLite migrations and should not be run in Supabase's PostgreSQL SQL Editor.
 
+For a new Supabase project, run `supabase/schema.sql` first, then run each SQL migration in `supabase/migrations/` in filename order. For an existing project, run any migration not yet applied before deploying code that depends on it. The stock reservation migration creates the reservation table and atomic order, release, and payment-settlement functions.
+
+Vercel deployments should set a strong random `CRON_SECRET` server environment variable. The configured five-minute Vercel cron calls the protected reservation cleanup endpoint with this secret; expired unpaid orders are cancelled and their reserved quantities are restored. Checkout and payment settlement also run cleanup, so local development does not depend on a cron service.
+
 ### Tables
 
-The app uses `products`, `product_images`, `product_sizes`, `customers`, `orders`, `order_items`, `returns`, `admin_users`, `admin_sessions`, `buyer_accounts`, `buyer_sessions`, `carts`, `cart_items`, `notifications`, `store_settings`, and `shipping_rates`.
+The app uses `products`, `product_images`, `product_sizes`, `customers`, `orders`, `order_items`, `stock_reservations`, `returns`, `admin_users`, `admin_sessions`, `buyer_accounts`, `buyer_sessions`, `carts`, `cart_items`, `notifications`, `store_settings`, and `shipping_rates`.
 
 ## Environment variables
 
@@ -124,6 +128,7 @@ SUPABASE_STORAGE_BUCKET=product-images
 | `ARKESEL_SENDER_ID` | Optional | SMS sender name; defaults to `BigPeeKicks`. Use a sender ID approved by Arkesel. |
 | `ADMIN_PHONE` | Optional | Ghana number used for admin SMS alerts, for example `0241234567` or `+233241234567`. Can also be set in admin store settings. |
 | `SUPABASE_STORAGE_BUCKET` | Optional | Public product image bucket name; defaults to `product-images`. |
+| `CRON_SECRET` | Required for scheduled Vercel cleanup | Strong random value used to authorize expired-reservation cleanup requests. |
 
 ### Key handling
 

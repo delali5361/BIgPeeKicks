@@ -1,8 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import { Bell, Package, LogOut, Menu, X, ShoppingCart, CreditCard, Users, RotateCcw, LayoutDashboard, Settings } from "lucide-react";
+import { Bell, LoaderCircle, Package, LogOut, Menu, X, ShoppingCart, CreditCard, Users, RotateCcw, LayoutDashboard, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/auth";
 import { BackButton } from "@/components/BackButton";
+import { toast } from "sonner";
 import logo from "../../logo/logo.png";
 
 const navItems = [
@@ -20,7 +21,14 @@ export function AdminSidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Array<{ id: number; title: string; message: string; read_at: string | null; created_at: string }>>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   useEffect(() => { void fetch("/api/admin/notifications").then((response) => response.ok ? response.json() as Promise<typeof notifications> : Promise.reject()).then(setNotifications).catch(() => undefined); }, []);
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try { await logout(); }
+    catch { toast.error("Could not log out. Please try again."); }
+    finally { setLoggingOut(false); }
+  };
 
   return (
     <>
@@ -65,11 +73,12 @@ export function AdminSidebar() {
               Logged in as <span className="text-foreground font-display">{adminName}</span>
             </p>
             <button
-              onClick={logout}
-              className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-4 py-2.5 text-xs font-display tracking-widest text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => void handleLogout()}
+              disabled={loggingOut}
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-background px-4 py-2.5 text-xs font-display tracking-widest text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
             >
-              <LogOut className="size-4" />
-              Logout
+              {loggingOut ? <LoaderCircle className="size-4 animate-spin" /> : <LogOut className="size-4" />}
+              {loggingOut ? "Logging out..." : "Logout"}
             </button>
           </div>
         </div>

@@ -30,40 +30,62 @@ function CheckoutPage() {
   const [paymentStage, setPaymentStage] = useState<"starting" | "waiting" | "verifying" | null>(null);
   const [deliverToSomeoneElse, setDeliverToSomeoneElse] = useState(false);
   const [city, setCity] = useState("");
+  const [recipientCity, setRecipientCity] = useState("");
   const [shippingRate, setShippingRate] = useState(0);
+  const [freeDeliveryApplied, setFreeDeliveryApplied] = useState(false);
   const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState(200);
+  const [quotedFor, setQuotedFor] = useState("");
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState("");
   const quoteRequest = useRef(0);
   const subtotal = lines.reduce((sum, line) => sum + line.product.price * line.qty, 0);
-  const shipping = subtotal >= freeDeliveryThreshold || subtotal === 0 ? 0 : shippingRate;
-  const total = Math.max(0, subtotal + shipping - discount);
+  const quoteCity = deliverToSomeoneElse ? recipientCity : city;
+  const quoteKey = JSON.stringify([quoteCity.trim().toLowerCase(), shippingMethod, subtotal, promo.trim().toUpperCase()]);
+  const quoteReady = Boolean(quoteCity.trim()) && quotedFor === quoteKey;
+  const shipping = quoteReady ? (freeDeliveryApplied ? 0 : shippingRate) : null;
+  const shippingLabel = quoteLoading ? "Calculating..." : quoteError ? "Unavailable" : !quoteCity.trim() ? "Enter delivery city" : !quoteReady ? "Calculating..." : shipping === 0 ? "Free" : formatPrice(shippingRate);
+  const total = Math.max(0, subtotal + (shipping ?? 0) - discount);
 
   useEffect(() => {
-    if (!city.trim() || !lines.length) return;
     const requestId = ++quoteRequest.current;
+    if (!quoteCity.trim() || !lines.length) {
+      setQuotedFor("");
+      setQuoteLoading(false);
+      return;
+    }
+    const requestKey = JSON.stringify([quoteCity.trim().toLowerCase(), shippingMethod, subtotal, promo.trim().toUpperCase()]);
     setQuoteLoading(true);
     setQuoteError("");
     const timer = window.setTimeout(() => {
       void fetch("/api/shipping/quote", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ city: city.trim(), method: shippingMethod, subtotal }),
+        body: JSON.stringify({ city: quoteCity.trim(), method: shippingMethod, subtotal, promoCode: promo.trim() }),
       }).then(async (response) => {
-        if (!response.ok) throw new Error("Delivery fee could not be updated");
-        return await response.json() as { shipping: number; freeDeliveryThreshold?: number };
+        if (!response.ok) {
+          const error = await response.json().catch(() => null) as { error?: string } | null;
+          throw new Error(error?.error ?? `Delivery fee request failed (${response.status})`);
+        }
+        return await response.json() as { shipping: number; discount: number; promoValid: boolean; freeDeliveryApplied: boolean; freeDeliveryThreshold?: number };
       }).then((quote) => {
         if (requestId !== quoteRequest.current) return;
         setShippingRate(quote.shipping);
+        setFreeDeliveryApplied(quote.freeDeliveryApplied);
+        setDiscount(quote.discount);
+        setPromoError(promo.trim() && !quote.promoValid ? "That code is not active." : "");
         if (typeof quote.freeDeliveryThreshold === "number") setFreeDeliveryThreshold(quote.freeDeliveryThreshold);
-      }).catch(() => {
-        if (requestId === quoteRequest.current) setQuoteError("Delivery fee could not be updated yet.");
+        setQuotedFor(requestKey);
+      }).catch((error: unknown) => {
+        if (requestId === quoteRequest.current) {
+          setQuotedFor("");
+          setQuoteError(error instanceof Error ? error.message : "Delivery fee could not be updated yet.");
+        }
       }).finally(() => {
         if (requestId === quoteRequest.current) setQuoteLoading(false);
       });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [city, lines.length, shippingMethod, subtotal]);
+  }, [quoteCity, lines.length, promo, shippingMethod, subtotal]);
 
   useEffect(() => {
     if (document.querySelector("script[data-paystack-inline]")) return;
@@ -77,13 +99,6 @@ function CheckoutPage() {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     if (!reviewing) {
-      if (promo.trim().toUpperCase() === "BIGPEE10") {
-        setDiscount(Math.round(subtotal * 0.1));
-        setPromoError("");
-      } else if (promo.trim()) {
-        setPromoError("That code is not active.");
-        return;
-      }
       setCity(String(form.get("city")));
       setReviewing(true);
       return;
@@ -101,23 +116,23 @@ function CheckoutPage() {
           address: String(form.get("address")),
           city: String(form.get("city")),
           country: "Ghana",
-          subtotal,
-          shipping,
-          total,
-          lines,
+          deliverToRecipient: deliverToSomeoneElse,
+          method: shippingMethod,
+          promoCode: promo.trim(),
+          lines: lines.map((line) => ({ productId: line.product.id, size: line.size, quantity: line.qty })),
           recipient: deliverToSomeoneElse ? { name: String(form.get("recipientName")), phone: String(form.get("recipientPhone")), address: String(form.get("recipientAddress")), city: String(form.get("recipientCity")), country: "Ghana" } : undefined,
         }),
       });
       const responseText = await response.text();
-      let payment: { reference?: string; orderId?: string; error?: string };
+      let payment: { reference?: string; orderId?: string; total?: number; error?: string };
       try { payment = JSON.parse(responseText) as typeof payment; } catch { throw new Error(responseText.startsWith("<!doctype") ? "Payment server error. Check the terminal for details." : "Invalid payment server response"); }
-      if (!response.ok || !payment.reference || !payment.orderId)
+      if (!response.ok || !payment.reference || !payment.orderId || typeof payment.total !== "number")
         throw new Error(payment.error ?? "Unable to start payment");
       const publicKey = import.meta.env["VITE_PAYSTACK_PUBLIC_KEY"] as string | undefined;
       const paystack = (window as Window & { PaystackPop?: new () => { newTransaction: (options: Record<string, unknown>) => void } }).PaystackPop;
       if (!publicKey || !paystack) throw new Error("Paystack popup is not configured");
       setPaymentStage("waiting");
-      new paystack().newTransaction({ key: publicKey, email: String(form.get("email")), amount: Math.round(total * 100), currency: "GHS", ref: payment.reference, onSuccess: async (result: { reference: string }) => { setPaymentStage("verifying"); const verification = await fetch("/api/payments/paystack/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reference: result.reference }) }); if (!verification.ok) throw new Error("Payment could not be verified"); clearCart(); window.location.assign(`/order-confirmation?orderId=${encodeURIComponent(payment.orderId!)}&reference=${encodeURIComponent(result.reference)}`); }, onCancel: () => setPaymentStage(null) });
+      new paystack().newTransaction({ key: publicKey, email: String(form.get("email")), amount: Math.round(payment.total * 100), currency: "GHS", ref: payment.reference, onSuccess: async (result: { reference: string }) => { setPaymentStage("verifying"); const verification = await fetch("/api/payments/paystack/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reference: result.reference }) }); if (!verification.ok) throw new Error("Payment could not be verified"); clearCart(); window.location.assign(`/order-confirmation?orderId=${encodeURIComponent(payment.orderId!)}&reference=${encodeURIComponent(result.reference)}`); }, onCancel: () => setPaymentStage(null) });
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : "Unable to start payment");
       setPaymentStage(null);
@@ -233,7 +248,7 @@ function CheckoutPage() {
                       <input value="Ghana" readOnly className="rounded-md border border-border bg-background px-4 py-3 text-sm text-muted-foreground" />
                     </div>
                     <label className="flex items-center gap-3 text-sm text-muted-foreground"><input type="checkbox" checked={deliverToSomeoneElse} onChange={(event) => setDeliverToSomeoneElse(event.target.checked)} /> Deliver to someone else</label>
-                    {deliverToSomeoneElse && <div className="space-y-4 border-l-2 border-primary/40 pl-4"><p className="font-display text-sm">Recipient details</p><input name="recipientName" required placeholder="Recipient full name" className="w-full rounded-md border border-border bg-surface px-4 py-3 text-sm" /><input name="recipientPhone" required type="tel" placeholder="Recipient phone number" className="w-full rounded-md border border-border bg-surface px-4 py-3 text-sm" /><input name="recipientAddress" required placeholder="Recipient address" className="w-full rounded-md border border-border bg-surface px-4 py-3 text-sm" /><input name="recipientCity" required placeholder="Recipient city" className="w-full rounded-md border border-border bg-surface px-4 py-3 text-sm" /><p className="text-xs text-muted-foreground">Delivery country: Ghana</p></div>}
+                    {deliverToSomeoneElse && <div className="space-y-4 border-l-2 border-primary/40 pl-4"><p className="font-display text-sm">Recipient details</p><input name="recipientName" required placeholder="Recipient full name" className="w-full rounded-md border border-border bg-surface px-4 py-3 text-sm" /><input name="recipientPhone" required type="tel" placeholder="Recipient phone number" className="w-full rounded-md border border-border bg-surface px-4 py-3 text-sm" /><input name="recipientAddress" required placeholder="Recipient address" className="w-full rounded-md border border-border bg-surface px-4 py-3 text-sm" /><input name="recipientCity" required value={recipientCity} onChange={(event) => setRecipientCity(event.target.value)} placeholder="Recipient city" className="w-full rounded-md border border-border bg-surface px-4 py-3 text-sm" /><p className="text-xs text-muted-foreground">Delivery country: Ghana</p></div>}
                   </fieldset>
 
                   <fieldset className="space-y-3">
@@ -250,7 +265,7 @@ function CheckoutPage() {
                         Standard delivery
                       </span>
                       <span className="text-muted-foreground">
-                        {shipping === 0 ? "Free" : formatPrice(shippingRate)}
+                        {shippingLabel}
                       </span>
                     </label>
                     <label className="flex cursor-pointer items-center justify-between border border-border bg-surface p-4 text-sm">
@@ -264,7 +279,7 @@ function CheckoutPage() {
                         />
                         Express delivery
                       </span>
-                      <span className="text-muted-foreground">{shippingMethod === "express" && shipping === 0 ? "Free" : formatPrice(shippingRate)}</span>
+                      <span className="text-muted-foreground">{shippingLabel}</span>
                     </label>
                   </fieldset>
                   {(quoteLoading || quoteError) && (
@@ -308,7 +323,7 @@ function CheckoutPage() {
                   )}
                   <button
                     type="submit"
-                    disabled={paymentStage !== null || quoteLoading}
+                    disabled={paymentStage !== null || (reviewing && (!quoteReady || quoteLoading || Boolean(promoError)))}
                     className="ember-fill w-full rounded-md py-4 font-display text-sm tracking-widest transition-transform hover:scale-[1.01] disabled:opacity-50"
                   >
                     {paymentStage !== null && <LoaderCircle className="mr-2 inline size-4 animate-spin" />}
@@ -357,7 +372,7 @@ function CheckoutPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Shipping</span>
-                <span>{shipping === 0 ? "Free" : formatPrice(shipping)}</span>
+                <span>{shipping === null ? shippingLabel : shipping === 0 ? "Free" : formatPrice(shipping)}</span>
               </div>
               <div className="flex justify-between font-display text-lg">
                 <span>Total</span>
@@ -368,9 +383,16 @@ function CheckoutPage() {
               <p className="flex gap-2">
                 <LockKeyhole className="size-4 shrink-0 text-primary" /> Secure payment processing
               </p>
-              <p className="flex gap-2">
-                <Truck className="size-4 shrink-0 text-primary" /> Free delivery over {formatPrice(freeDeliveryThreshold)}
-              </p>
+              {freeDeliveryThreshold > 0 ? (
+                <p className="flex gap-2">
+                  <Truck className="size-4 shrink-0 text-primary" />
+                  {freeDeliveryApplied
+                    ? `Free delivery applied: order meets the ${formatPrice(freeDeliveryThreshold)} threshold`
+                    : `Free delivery over ${formatPrice(freeDeliveryThreshold)}`}
+                </p>
+              ) : (
+                <p className="flex gap-2"><Truck className="size-4 shrink-0 text-primary" />Delivery fee uses the selected location rate</p>
+              )}
             </div>
           </aside>
         </div>

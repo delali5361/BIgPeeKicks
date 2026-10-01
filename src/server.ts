@@ -6,7 +6,7 @@ import { createProduct, deleteProduct, listActiveProducts, updateProduct } from 
 import { getDatabase } from "./lib/database.server";
 import { adminName, changeAdminPassword, isAdminRequest, loginAdmin, logoutAdmin } from "./lib/admin-auth.server";
 import { initializePaystackPayment, verifyPaystackPayment } from "./lib/paystack.server";
-import { attachPaymentReference, createPendingOrder, listOrders, markOrderPaid, requestOrderReturn, updateOrderStatus, updateReturnStatus } from "./lib/orders.server";
+import { attachPaymentReference, createPendingOrder, listOrders, markOrderPaid, releaseExpiredReservations, releaseOrderReservation, requestOrderReturn, updateOrderStatus, updateReturnStatus } from "./lib/orders.server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { deflateSync, inflateSync } from "node:zlib";
@@ -15,6 +15,8 @@ import { createNotification, getAdminPhone, listNotifications, markNotifications
 import { storeProductImage } from "./lib/images.server";
 import { getCartId, readCart, replaceCart } from "./lib/cart.server";
 import { currentBuyer, loginBuyer, logoutBuyer, registerBuyer } from "./lib/buyer-auth.server";
+import { quoteShipping } from "./lib/shipping.server";
+import { toPesewas } from "./lib/currency";
 
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 
@@ -170,6 +172,12 @@ export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       const requestUrl = new URL(request.url);
+      if (requestUrl.pathname === "/api/cron/release-stock-reservations" && request.method === "GET") {
+        const cronSecret = process.env["CRON_SECRET"];
+        if (!cronSecret || request.headers.get("authorization") !== `Bearer ${cronSecret}`) return Response.json({ error: "Unauthorized" }, { status: 401 });
+        await releaseExpiredReservations(getDatabase());
+        return Response.json({ released: true });
+      }
       if (requestUrl.pathname.startsWith("/uploads/products/") && request.method === "GET") {
         const relativePath = decodeURIComponent(requestUrl.pathname.slice("/uploads/".length));
         const filePath = normalize(join(process.cwd(), "uploads", relativePath));
@@ -196,20 +204,10 @@ export default {
       }
       if (requestUrl.pathname === "/api/health" && request.method === "GET") return Response.json({ ok: true, service: "big-pee-kicks" });
       if (requestUrl.pathname === "/api/shipping/quote" && request.method === "POST") {
-        const payload = await request.json() as { city?: string; method?: "standard" | "express"; subtotal?: number };
+        const payload = await request.json() as { city?: string; method?: "standard" | "express"; subtotal?: number; promoCode?: string };
         const database = getDatabase();
-        const location = payload.city?.trim() || "Other";
-        const rates = await database.prepare("SELECT standard, express FROM shipping_rates WHERE LOWER(location) = LOWER(?)").bind(location).all<{ standard: number; express: number }>();
-        const fallback = await database.prepare("SELECT standard, express FROM shipping_rates WHERE location = 'Other'").bind().all<{ standard: number; express: number }>();
-        const configuredSettings = await database.prepare("SELECT key, value FROM store_settings WHERE key IN ('standardShipping', 'expressShipping', 'freeDeliveryThreshold')").bind().all<{ key: string; value: string }>();
-        const settingsRates = configuredSettings.results.reduce((values, setting) => ({ ...values, [setting.key]: Number(setting.value) }), {} as { standardShipping?: number; expressShipping?: number; freeDeliveryThreshold?: number });
-        const rate = rates.results[0] ?? fallback.results[0] ?? {
-          standard: settingsRates.standardShipping,
-          express: settingsRates.expressShipping,
-        };
-        const freeDeliveryThreshold = settingsRates.freeDeliveryThreshold !== undefined && Number.isFinite(settingsRates.freeDeliveryThreshold) ? settingsRates.freeDeliveryThreshold : 200;
-        const shipping = (payload.subtotal ?? 0) >= freeDeliveryThreshold ? 0 : (rate?.[payload.method === "express" ? "express" : "standard"] ?? 0);
-        return Response.json({ shipping, freeDeliveryThreshold, location: rates.results[0] ? location : "Other" });
+        const quote = await quoteShipping(database, payload.city ?? "", payload.method === "express" ? "express" : "standard", Number.isFinite(payload.subtotal) ? payload.subtotal! : 0, payload.promoCode);
+        return Response.json(quote);
       }
       if (requestUrl.pathname === "/api/buyer/register" && request.method === "POST") {
         const payload = await request.json() as { name?: string; email?: string; password?: string };
@@ -370,19 +368,27 @@ export default {
       }
       if (new URL(request.url).pathname === "/api/payments/paystack/initialize" && request.method === "POST") {
         const payload = await request.json() as Parameters<typeof createPendingOrder>[1];
-        if (!payload.email || !payload.name || !payload.lines?.length || typeof payload.total !== "number") return Response.json({ error: "Complete checkout details are required" }, { status: 400 });
+        if (!payload.email || !payload.name || !payload.lines?.length || !payload.city || !["standard", "express"].includes(payload.method)) return Response.json({ error: "Complete checkout and delivery details are required" }, { status: 400 });
         const database = getDatabase();
-        const orderId = await createPendingOrder(database, payload);
-        const payment = await initializePaystackPayment({ email: payload.email, amount: payload.total, callbackUrl: new URL(`/order-confirmation?orderId=${orderId}`, request.url).toString(), metadata: { orderId } });
-        await attachPaymentReference(database, orderId, payment.reference);
-        return Response.json({ ...payment, orderId });
+        const order = await createPendingOrder(database, payload);
+        try {
+          const payment = await initializePaystackPayment({ email: payload.email, amount: order.total, callbackUrl: new URL(`/order-confirmation?orderId=${order.orderId}`, request.url).toString(), metadata: { orderId: order.orderId } });
+          await attachPaymentReference(database, order.orderId, payment.reference);
+          return Response.json({ ...payment, ...order });
+        } catch (error) {
+          await releaseOrderReservation(database, order.orderId);
+          throw error;
+        }
       }
       if (new URL(request.url).pathname === "/api/payments/paystack/verify" && request.method === "POST") {
         const payload = await request.json() as { reference?: string };
         if (!payload.reference) return Response.json({ error: "Payment reference is required" }, { status: 400 });
-        const verified = await verifyPaystackPayment(payload.reference);
+        const database = getDatabase();
+        const order = await database.prepare("SELECT total FROM orders WHERE payment_reference = ?").bind(payload.reference).all<{ total: number }>();
+        if (!order.results[0]) return Response.json({ error: "Payment reference does not match an order" }, { status: 404 });
+        const verified = await verifyPaystackPayment(payload.reference, order.results[0].total);
         if (!verified) return Response.json({ paid: false }, { status: 402 });
-        await markOrderPaid(getDatabase(), payload.reference);
+        await markOrderPaid(database, payload.reference, toPesewas(order.results[0].total), "GHS");
         return Response.json({ paid: true });
       }
       if (new URL(request.url).pathname === "/api/payments/paystack/webhook" && request.method === "POST") {
@@ -393,8 +399,8 @@ export default {
         const signatureBuffer = Buffer.from(signature);
         const expectedBuffer = Buffer.from(expected);
         if (!signature || !expected || signatureBuffer.length !== expectedBuffer.length || !timingSafeEqual(signatureBuffer, expectedBuffer)) return Response.json({ error: "Invalid signature" }, { status: 401 });
-        const event = JSON.parse(body) as { event?: string; data?: { reference?: string } };
-        if (event.event === "charge.success" && event.data?.reference) await markOrderPaid(getDatabase(), event.data.reference);
+        const event = JSON.parse(body) as { event?: string; data?: { reference?: string; amount?: number; currency?: string } };
+        if (event.event === "charge.success" && event.data?.reference && typeof event.data.amount === "number" && event.data.currency) await markOrderPaid(getDatabase(), event.data.reference, event.data.amount, event.data.currency);
         return Response.json({ received: true });
       }
       const handler = await getServerEntry();

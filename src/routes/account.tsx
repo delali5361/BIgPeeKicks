@@ -1,20 +1,28 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Download, Package, RotateCcw, Truck } from "lucide-react";
+import { Download, LoaderCircle, Package, RotateCcw, Truck } from "lucide-react";
 import { SiteHeader } from "@/components/SiteHeader";
 import { useOrders } from "@/context/orders";
 import { useAuth } from "@/context/auth";
 import { formatPrice } from "@/lib/currency";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/account")({ component: AccountPage });
 
 function AccountPage() {
   const { orders, requestReturn, reloadOrders } = useOrders();
   const { buyer } = useAuth();
+  const [requestingReturn, setRequestingReturn] = useState("");
   const buyerOrders = buyer ? orders : [];
   useEffect(() => {
     if (buyer) void reloadOrders().catch(() => undefined);
   }, [buyer, reloadOrders]);
+  const submitReturn = async (id: string) => {
+    setRequestingReturn(id);
+    try { await requestReturn(id); }
+    catch (error) { toast.error(error instanceof Error ? error.message : "Unable to request return"); }
+    finally { setRequestingReturn(""); }
+  };
   return (
     <div className="min-h-screen bg-background">
       <SiteHeader />
@@ -77,12 +85,12 @@ function AccountPage() {
                     </a>
                   )}
                   <button
-                    disabled={Boolean(order.returnStatus)}
-                    onClick={() => requestReturn(order.id)}
+                    disabled={Boolean(order.returnStatus) || Boolean(requestingReturn)}
+                    onClick={() => void submitReturn(order.id)}
                     className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-xs text-muted-foreground hover:border-primary hover:text-primary disabled:opacity-50"
                   >
-                    <RotateCcw className="size-4" />{" "}
-                    {order.returnStatus ?? "Request return / exchange"}
+                    {requestingReturn === order.id ? <LoaderCircle className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}{" "}
+                    {requestingReturn === order.id ? "Submitting..." : order.returnStatus ?? "Request return / exchange"}
                   </button>
                 </div>
               </article>

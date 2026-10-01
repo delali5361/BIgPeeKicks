@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto";
-import type { CartLine } from "@/components/CartDrawer";
 import type { CatalogDatabase } from "@/lib/catalog.server";
 import { createNotification, getAdminPhone, sendArkeselSms } from "@/lib/notifications.server";
+import type { ShippingMethod } from "@/lib/shipping.server";
+import { toPesewas } from "@/lib/currency";
 
 export type PendingOrderInput = {
   email: string;
@@ -11,46 +11,58 @@ export type PendingOrderInput = {
   address: string;
   city: string;
   country: string;
-  subtotal: number;
-  shipping: number;
-  total: number;
-  lines: CartLine[];
+  recipient?: { name: string; phone: string; address: string; city: string; country: string };
+  deliverToRecipient?: boolean;
+  method: ShippingMethod;
+  promoCode?: string;
+  lines: Array<{ productId: string; size: number; quantity: number }>;
 };
 
 export async function createPendingOrder(database: CatalogDatabase, input: PendingOrderInput) {
-  const now = new Date().toISOString();
-  const customerId = `customer-${randomBytes(8).toString("hex")}`;
-  const orderId = `BPK-${Date.now().toString().slice(-8)}`;
-  await database.prepare(
-    `INSERT INTO customers (id, name, email, phone, address, city, country, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(email) DO UPDATE SET name = excluded.name, address = excluded.address, city = excluded.city, country = excluded.country, updated_at = excluded.updated_at`,
-  ).bind(customerId, input.name, input.email, input.phone ?? null, input.address, input.city, input.country, now, now).run();
-  const customer = await database.prepare("SELECT id FROM customers WHERE email = ?").bind(input.email).all<{ id: string }>();
-  const savedCustomerId = customer.results[0]?.id ?? customerId;
-  await database.prepare(
-    `INSERT INTO orders (id, customer_id, subtotal, shipping, total, delivery_email, delivery_name, delivery_address, delivery_city, delivery_country, delivery_phone, recipient_name, recipient_phone, recipient_address, recipient_city, recipient_country, placed_at, estimated_delivery)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(orderId, savedCustomerId, input.subtotal, input.shipping, input.total, input.email, input.name, input.address, input.city, input.country, input.phone ?? null, input.recipient?.name ?? input.name, input.recipient?.phone ?? input.phone ?? null, input.recipient?.address ?? input.address, input.recipient?.city ?? input.city, input.recipient?.country ?? input.country, now, new Date(Date.now() + 5 * 86400000).toISOString()).run();
+  if (!input.email.trim() || !input.name.trim() || !input.address.trim() || !input.city.trim()) throw new Error("Contact and delivery details are required");
+  if (!input.lines.length || input.lines.length > 50) throw new Error("The cart must contain between 1 and 50 product lines");
+  const requested = new Map<string, { productId: string; size: number; quantity: number }>();
   for (const line of input.lines) {
-    await database.prepare("INSERT INTO order_items (order_id, product_id, product_name, size, quantity, unit_price) VALUES (?, ?, ?, ?, ?, ?)").bind(orderId, line.product.id, line.product.name, line.size, line.qty, line.product.price).run();
+    if (!line.productId || !Number.isInteger(line.size) || !Number.isInteger(line.quantity) || line.quantity < 1) throw new Error("Cart contains an invalid product, size, or quantity");
+    const key = `${line.productId}:${line.size}`;
+    const existing = requested.get(key);
+    requested.set(key, { ...line, quantity: line.quantity + (existing?.quantity ?? 0) });
   }
-  await createNotification(database, "New order awaiting payment", `Order ${orderId} was placed by ${input.name}. Amount due: GHS ${input.total.toFixed(2)}. Delivery: ${input.city}, ${input.country}. Payment is still pending.`, orderId);
-  return orderId;
+  const orderInput = {
+    ...input,
+    shippingCity: input.deliverToRecipient ? input.recipient?.city ?? input.city : input.city,
+  };
+  const result = await database.prepare("SELECT public.create_pending_order(?::jsonb, ?::jsonb) AS order_result")
+    .bind(JSON.stringify(orderInput), JSON.stringify([...requested.values()]))
+    .all<{ order_result: { orderId: string; subtotal: number; shipping: number; discount: number; total: number; reservationExpiresAt: string } }>();
+  const order = result.results[0]?.order_result;
+  if (!order?.orderId) throw new Error("Unable to create inventory reservation");
+  await createNotification(database, "New order awaiting payment", `Order ${order.orderId} was placed by ${input.name}. Amount due: GHS ${order.total.toFixed(2)}. Delivery: ${input.city}, ${input.country}. Payment is still pending.`, order.orderId);
+  return order;
 }
 
-export async function markOrderPaid(database: CatalogDatabase, reference: string): Promise<void> {
+export async function markOrderPaid(database: CatalogDatabase, reference: string, amount: number, currency: string): Promise<void> {
   const order = await database.prepare("SELECT id, payment_status, delivery_name, delivery_email, delivery_phone, recipient_phone, total FROM orders WHERE payment_reference = ?").bind(reference).all<{ id: string; payment_status: string; delivery_name: string; delivery_email: string; delivery_phone: string | null; recipient_phone: string | null; total: number }>();
   if (!order.results[0]) throw new Error("Payment reference does not match an order");
+  if (amount !== toPesewas(order.results[0].total) || currency !== "GHS") throw new Error("Verified payment amount does not match the order total");
   if (order.results[0].payment_status !== "Pending") return;
-  await database.prepare("UPDATE orders SET payment_status = 'Paid', paid_at = ? WHERE id = ? AND payment_status = 'Pending'").bind(new Date().toISOString(), order.results[0].id).run();
-  const items = await database.prepare("SELECT product_id, size, quantity FROM order_items WHERE order_id = ?").bind(order.results[0].id).all<{ product_id: string; size: number; quantity: number }>();
-  for (const item of items.results) {
-    await database.prepare("UPDATE product_sizes SET stock = GREATEST(0, stock - ?) WHERE product_id = ? AND size = ?").bind(item.quantity, item.product_id, item.size).run();
-  }
-  await createNotification(database, "Payment confirmed", `Payment confirmed for order ${order.results[0].id}. Buyer: ${order.results[0].delivery_name}. Amount paid: GHS ${order.results[0].total.toFixed(2)}. Stock was updated and the order is ready for processing.`, order.results[0].id);
-  await sendArkeselSms([order.results[0].delivery_phone ?? "", order.results[0].recipient_phone ?? ""], `Big Pee Kicks: payment confirmed for order ${order.results[0].id}. Amount paid: GHS ${order.results[0].total.toFixed(2)}. We will prepare your delivery.`).catch((error) => console.error(error));
-  await sendArkeselSms([await getAdminPhone(database)], `Big Pee Kicks admin: payment confirmed. Order ${order.results[0].id}, buyer ${order.results[0].delivery_name}, amount GHS ${order.results[0].total.toFixed(2)}. Please process the order.`).catch((error) => console.error(error));
+  const settlement = await database.prepare("SELECT public.settle_order_payment(?, ?, ?) AS settlement_result")
+    .bind(reference, amount, currency)
+    .all<{ settlement_result: { changed: boolean; orderId: string; late: boolean; stockAvailable: boolean } }>();
+  const result = settlement.results[0]?.settlement_result;
+  if (!result?.changed) return;
+  const adminMessage = result.stockAvailable
+    ? `Payment confirmed for order ${order.results[0].id}. Buyer: ${order.results[0].delivery_name}. Amount paid: GHS ${order.results[0].total.toFixed(2)}. Reserved stock is ready for processing.`
+    : `Payment confirmed for order ${order.results[0].id}, but the expired stock reservation could not be reacquired. Review fulfillment and contact the buyer about a replacement or refund.`;
+  await createNotification(database, result.stockAvailable ? "Payment confirmed" : "Paid order needs stock review", adminMessage, order.results[0].id, result.stockAvailable ? "order" : "payment");
+  const buyerMessage = result.stockAvailable
+    ? `Big Pee Kicks: payment confirmed for order ${order.results[0].id}. Amount paid: GHS ${order.results[0].total.toFixed(2)}. We will prepare your delivery.`
+    : `Big Pee Kicks: payment received for order ${order.results[0].id}. We are confirming stock and will contact you shortly with an update.`;
+  const adminSms = result.stockAvailable
+    ? `Big Pee Kicks admin: payment confirmed. Order ${order.results[0].id}, buyer ${order.results[0].delivery_name}, amount GHS ${order.results[0].total.toFixed(2)}. Please process the order.`
+    : `Big Pee Kicks admin: urgent stock review. Order ${order.results[0].id} was paid after its reservation expired and stock could not be reclaimed. Contact the buyer to arrange fulfillment or refund.`;
+  await sendArkeselSms([order.results[0].delivery_phone ?? "", order.results[0].recipient_phone ?? ""], buyerMessage).catch((error) => console.error(error));
+  await sendArkeselSms([await getAdminPhone(database)], adminSms).catch((error) => console.error(error));
 }
 
 export async function attachPaymentReference(database: CatalogDatabase, orderId: string, reference: string): Promise<void> {
@@ -58,7 +70,7 @@ export async function attachPaymentReference(database: CatalogDatabase, orderId:
 }
 
 export async function listOrders(database: CatalogDatabase, customerId?: string, email?: string) {
-  const filter = customerId ? "o.customer_id = ?" : email ? "c.email = ?" : "1 = 1";
+  const filter = customerId ? "o.customer_id = ?" : email ? "LOWER(c.email) = LOWER(?)" : "1 = 1";
   const value = customerId ?? email;
   const orders = await database.prepare(`SELECT o.id, o.status, o.payment_status, o.payment_reference, o.total, o.shipping, o.delivery_email, o.delivery_name, o.delivery_address, o.delivery_city, o.delivery_country, o.delivery_phone, o.recipient_name, o.recipient_phone, o.recipient_address, o.recipient_city, o.recipient_country, o.placed_at, o.estimated_delivery, r.status AS return_status, r.reason AS return_reason FROM orders o JOIN customers c ON c.id = o.customer_id LEFT JOIN returns r ON r.order_id = o.id WHERE ${filter} ORDER BY o.placed_at DESC`).bind(...(value ? [value] : [])).all<{ id: string; status: string; payment_status: string; payment_reference: string | null; total: number; shipping: number; delivery_email: string; delivery_name: string; delivery_address: string; delivery_city: string; delivery_country: string; delivery_phone: string | null; recipient_name: string | null; recipient_phone: string | null; recipient_address: string | null; recipient_city: string | null; recipient_country: string | null; placed_at: string; estimated_delivery: string; return_status: "Requested" | "Approved" | "Rejected" | null; return_reason: string | null }>();
   const items = await database.prepare("SELECT order_id, product_id, product_name, size, quantity, unit_price FROM order_items").bind().all<{ order_id: string; product_id: string; product_name: string; size: number; quantity: number; unit_price: number }>();
@@ -107,4 +119,12 @@ export async function updateOrderStatus(database: CatalogDatabase, orderId: stri
     await sendArkeselSms([order.results[0].delivery_phone ?? "", order.results[0].recipient_phone ?? ""], `Big Pee Kicks: order ${orderId} has shipped. Please keep your phone available for delivery updates.`).catch((error) => console.error(error));
     await sendArkeselSms([await getAdminPhone(database)], `Big Pee Kicks admin: order ${orderId} for ${order.results[0].delivery_name} was marked as shipped successfully.`).catch((error) => console.error(error));
   }
+}
+
+export async function releaseOrderReservation(database: CatalogDatabase, orderId: string): Promise<void> {
+  await database.prepare("SELECT public.release_order_stock_reservation(?) AS released_count").bind(orderId).all<{ released_count: number }>();
+}
+
+export async function releaseExpiredReservations(database: CatalogDatabase): Promise<void> {
+  await database.prepare("SELECT public.release_expired_stock_reservations() AS released_count").bind().all<{ released_count: number }>();
 }

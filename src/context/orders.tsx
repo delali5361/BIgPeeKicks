@@ -22,8 +22,8 @@ export type Order = {
 type OrdersContextValue = {
   orders: Order[];
   placeOrder: (order: Omit<Order, "id" | "placedAt" | "status" | "paymentStatus" | "estimatedDelivery">) => Order;
-  requestReturn: (id: string) => void;
-  updateOrder: (id: string, changes: Partial<Order>) => void;
+  requestReturn: (id: string) => Promise<void>;
+  updateOrder: (id: string, changes: Partial<Order>) => Promise<void>;
   reloadOrders: () => Promise<void>;
 };
 
@@ -50,11 +50,18 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     persist([nextOrder, ...orders]);
     return nextOrder;
   };
-  const requestReturn = (id: string) => { const next = orders.map((order) => order.id === id ? { ...order, returnStatus: "Requested" as const } : order); void fetch(`/api/orders/${id}/return`, { method: "POST" }).then((response) => { if (!response.ok) throw new Error("Unable to request return"); persist(next); }).catch(() => undefined); };
-  const updateOrder = (id: string, changes: Partial<Order>) => {
+  const requestReturn = async (id: string) => {
+    const response = await fetch(`/api/orders/${id}/return`, { method: "POST" });
+    if (!response.ok) throw new Error("Unable to request return");
+    persist(orders.map((order) => order.id === id ? { ...order, returnStatus: "Requested" as const } : order));
+  };
+  const updateOrder = async (id: string, changes: Partial<Order>) => {
     const next = orders.map((order) => order.id === id ? { ...order, ...changes } : order);
-    if (changes.status || changes.returnStatus) void fetch(`/api/orders/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(changes.status ? { status: changes.status } : { returnStatus: changes.returnStatus }) }).then((response) => { if (!response.ok) throw new Error("Unable to update order"); }).then(() => persist(next)).catch(() => undefined);
-    else persist(next);
+    if (changes.status || changes.returnStatus) {
+      const response = await fetch(`/api/orders/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(changes.status ? { status: changes.status } : { returnStatus: changes.returnStatus }) });
+      if (!response.ok) throw new Error("Unable to update order");
+    }
+    persist(next);
   };
   return <OrdersContext.Provider value={{ orders, placeOrder, requestReturn, updateOrder, reloadOrders }}>{children}</OrdersContext.Provider>;
 }

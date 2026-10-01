@@ -8,7 +8,7 @@ type AuthCtx = {
   buyer: { id: string; name: string; email: string } | null;
   buyerLogin: (email: string, password: string) => Promise<boolean>;
   buyerRegister: (name: string, email: string, password: string) => Promise<boolean>;
-  buyerLogout: () => void;
+  buyerLogout: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -48,8 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return true;
   };
 
-  const buyerLogout = () => {
-    void fetch("/api/buyer/logout", { method: "POST" });
+  const buyerLogout = async () => {
+    await fetch("/api/buyer/logout", { method: "POST" });
     setBuyer(null);
   };
 

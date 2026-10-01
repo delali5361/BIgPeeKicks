@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import type { Product } from "@/data/products";
 import { toast } from "sonner";
+import { BusyButton } from "@/components/BusyButton";
 
 type AddProductModalProps = {
   open: boolean;
@@ -15,6 +16,7 @@ export function AddProductModal({ open, onClose, onAdd }: AddProductModalProps) 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState("");
   const [imageError, setImageError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     category: "Shoes" as Product["category"],
@@ -49,6 +51,7 @@ export function AddProductModal({ open, onClose, onAdd }: AddProductModalProps) 
       setImageError("Upload a product image before saving.");
       return;
     }
+    setSaving(true);
     try { await onAdd({
       name: formData.name,
       category: formData.category,
@@ -61,7 +64,7 @@ export function AddProductModal({ open, onClose, onAdd }: AddProductModalProps) 
       createdAt: new Date().toISOString().slice(0, 10),
       stock: formData.stock,
       status: formData.status,
-    }); } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to save product"); return; }
+    }); } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to save product"); return; } finally { setSaving(false); }
     toast.success(`${formData.name} added to inventory`);
     setFormData({
       name: "",
@@ -90,8 +93,9 @@ export function AddProductModal({ open, onClose, onAdd }: AddProductModalProps) 
       <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-4 sm:items-center sm:px-5 sm:py-8">
         <div className="my-auto max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-surface p-5 relative sm:max-h-[calc(100vh-4rem)] sm:p-8">
           <button
+            disabled={saving}
             onClick={onClose}
-            className="absolute right-4 top-4 rounded-full p-2 text-muted-foreground transition-colors hover:text-foreground"
+            className="absolute right-4 top-4 rounded-full p-2 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
             aria-label="Close modal"
           >
             <X className="size-4" />
@@ -218,17 +222,15 @@ export function AddProductModal({ open, onClose, onAdd }: AddProductModalProps) 
             <div className="pt-2 flex gap-3">
               <button
                 type="button"
+                disabled={saving}
                 onClick={onClose}
-                className="flex-1 rounded-md border border-border px-4 py-2.5 font-display text-xs tracking-widest text-muted-foreground transition-colors hover:text-foreground"
+                className="flex-1 rounded-md border border-border px-4 py-2.5 font-display text-xs tracking-widest text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
               >
                 Cancel
               </button>
-              <button
-                type="submit"
-                className="ember-fill flex-1 rounded-md px-4 py-2.5 font-display text-xs tracking-widest transition-transform hover:scale-[1.01]"
-              >
-                Add product
-              </button>
+              <BusyButton type="submit" busy={saving} className="ember-fill flex-1 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 font-display text-xs tracking-widest transition-transform hover:scale-[1.01] disabled:opacity-50">
+                {saving ? "Saving product..." : "Add product"}
+              </BusyButton>
             </div>
           </form>
         </div>

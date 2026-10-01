@@ -10,16 +10,17 @@ const matchesPassword = (password: string, stored: string) => { const [salt, has
 function tokenFrom(request: Request) { return request.headers.get("cookie")?.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1]; }
 
 export async function registerBuyer(database: CatalogDatabase, name: string, email: string, password: string) {
-  if (name.trim().length < 2 || password.length < 6) return null;
-  const existing = await database.prepare("SELECT id FROM buyer_accounts WHERE email = ?").bind(email.trim()).all<{ id: string }>();
+  const normalizedEmail = email.trim().toLowerCase();
+  if (name.trim().length < 2 || !normalizedEmail || password.length < 6) return null;
+  const existing = await database.prepare("SELECT id FROM buyer_accounts WHERE LOWER(email) = ?").bind(normalizedEmail).all<{ id: string }>();
   if (existing.results[0]) return null;
-  const buyer = { id: `buyer-${randomBytes(8).toString("hex")}`, name: name.trim(), email: email.trim(), password_hash: storePassword(password) };
+  const buyer = { id: `buyer-${randomBytes(8).toString("hex")}`, name: name.trim(), email: normalizedEmail, password_hash: storePassword(password) };
   await database.prepare("INSERT INTO buyer_accounts (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)").bind(buyer.id, buyer.name, buyer.email, buyer.password_hash, new Date().toISOString()).run();
   return createSession(database, buyer.id, buyer.name, buyer.email);
 }
 
 export async function loginBuyer(database: CatalogDatabase, email: string, password: string) {
-  const result = await database.prepare("SELECT id, name, email, password_hash FROM buyer_accounts WHERE email = ?").bind(email.trim()).all<{ id: string; name: string; email: string; password_hash: string }>();
+  const result = await database.prepare("SELECT id, name, email, password_hash FROM buyer_accounts WHERE LOWER(email) = ?").bind(email.trim().toLowerCase()).all<{ id: string; name: string; email: string; password_hash: string }>();
   const buyer = result.results[0];
   if (!buyer || !matchesPassword(password, buyer.password_hash)) return null;
   return createSession(database, buyer.id, buyer.name, buyer.email);
