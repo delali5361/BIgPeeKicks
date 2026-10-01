@@ -92,7 +92,10 @@ declare
   shipping_express numeric;
   free_threshold numeric;
   promo_code text;
-    shipping_city text := coalesce(
+  promo_discount numeric;
+  selected_method text := coalesce(order_data ->> 'method', 'standard');
+  requested_promo text := upper(trim(coalesce(order_data ->> 'promoCode', '')));
+  shipping_city text := coalesce(
       nullif(trim(order_data ->> 'shippingCity'), ''),
       case
         when coalesce((order_data ->> 'deliverToRecipient')::boolean, false)
@@ -100,9 +103,6 @@ declare
         else trim(order_data ->> 'city')
       end
     );
-      then coalesce(nullif(trim(order_data #>> '{recipient,city}'), ''), trim(order_data ->> 'city'))
-    else trim(order_data ->> 'city')
-  end;
   free_delivery_applied boolean := false;
   expires timestamptz := now() + interval '20 minutes';
 begin

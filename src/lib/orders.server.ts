@@ -1,6 +1,6 @@
 import type { CatalogDatabase } from "@/lib/catalog.server";
 import { createNotification, getAdminPhone, sendArkeselSms } from "@/lib/notifications.server";
-import type { ShippingMethod } from "@/lib/shipping.server";
+import { quoteShipping, type ShippingMethod } from "@/lib/shipping.server";
 import { toPesewas } from "@/lib/currency";
 
 export type PendingOrderInput = {
@@ -11,7 +11,6 @@ export type PendingOrderInput = {
   address: string;
   city: string;
   country: string;
-  recipient?: { name: string; phone: string; address: string; city: string; country: string };
   deliverToRecipient?: boolean;
   method: ShippingMethod;
   promoCode?: string;
@@ -37,6 +36,12 @@ export async function createPendingOrder(database: CatalogDatabase, input: Pendi
     .all<{ order_result: { orderId: string; subtotal: number; shipping: number; discount: number; total: number; reservationExpiresAt: string } }>();
   const order = result.results[0]?.order_result;
   if (!order?.orderId) throw new Error("Unable to create inventory reservation");
+  const shippingCity = input.deliverToRecipient ? input.recipient?.city || input.city : input.city;
+  const quote = await quoteShipping(database, shippingCity, input.method, order.subtotal, input.promoCode);
+  if (order.shipping !== quote.shipping || order.discount !== quote.discount || order.total !== quote.total) {
+    await releaseOrderReservation(database, order.orderId);
+    throw new Error("Supabase shipping calculation is out of date. Run the latest stock reservation SQL migration before accepting payment.");
+  }
   await createNotification(database, "New order awaiting payment", `Order ${order.orderId} was placed by ${input.name}. Amount due: GHS ${order.total.toFixed(2)}. Delivery: ${input.city}, ${input.country}. Payment is still pending.`, order.orderId);
   return order;
 }

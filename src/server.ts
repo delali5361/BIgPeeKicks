@@ -370,7 +370,15 @@ export default {
         const payload = await request.json() as Parameters<typeof createPendingOrder>[1];
         if (!payload.email || !payload.name || !payload.lines?.length || !payload.city || !["standard", "express"].includes(payload.method)) return Response.json({ error: "Complete checkout and delivery details are required" }, { status: 400 });
         const database = getDatabase();
-        const order = await createPendingOrder(database, payload);
+        let order: Awaited<ReturnType<typeof createPendingOrder>>;
+        try {
+          order = await createPendingOrder(database, payload);
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith("Supabase shipping calculation is out of date.")) {
+            return Response.json({ error: error.message }, { status: 409 });
+          }
+          throw error;
+        }
         try {
           const payment = await initializePaystackPayment({ email: payload.email, amount: order.total, callbackUrl: new URL(`/order-confirmation?orderId=${order.orderId}`, request.url).toString(), metadata: { orderId: order.orderId } });
           await attachPaymentReference(database, order.orderId, payment.reference);
