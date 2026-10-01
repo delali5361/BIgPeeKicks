@@ -28,7 +28,9 @@ function Shoe() {
   );
 }
 
-useGLTF.preload("/models/shoe.glb");
+if (typeof window !== "undefined") {
+  useGLTF.preload("/models/shoe.glb");
+}
 
 export default function ShoeScene() {
   return (
