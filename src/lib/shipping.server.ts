@@ -37,9 +37,13 @@ export async function quoteShipping(
     ? Math.round(subtotal * Math.min(100, Math.max(0, promoDiscount)) / 100)
     : 0;
   const freeDeliveryApplied = subtotal > 0 && threshold > 0 && subtotal >= threshold;
-  const shipping = freeDeliveryApplied ? 0 : rate[method];
+  const standardShipping = freeDeliveryApplied ? 0 : rate.standard;
+  const expressShipping = freeDeliveryApplied ? 0 : rate.express;
+  const shipping = method === "express" ? expressShipping : standardShipping;
   return {
     shipping,
+    standardShipping,
+    expressShipping,
     freeDeliveryApplied,
     discount,
     total: Math.max(0, subtotal + shipping - discount),

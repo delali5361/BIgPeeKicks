@@ -31,7 +31,8 @@ function CheckoutPage() {
   const [deliverToSomeoneElse, setDeliverToSomeoneElse] = useState(false);
   const [city, setCity] = useState("");
   const [recipientCity, setRecipientCity] = useState("");
-  const [shippingRate, setShippingRate] = useState(0);
+  const [standardShippingRate, setStandardShippingRate] = useState(0);
+  const [expressShippingRate, setExpressShippingRate] = useState(0);
   const [freeDeliveryApplied, setFreeDeliveryApplied] = useState(false);
   const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState(200);
   const [quotedFor, setQuotedFor] = useState("");
@@ -40,10 +41,15 @@ function CheckoutPage() {
   const quoteRequest = useRef(0);
   const subtotal = lines.reduce((sum, line) => sum + line.product.price * line.qty, 0);
   const quoteCity = deliverToSomeoneElse ? recipientCity : city;
-  const quoteKey = JSON.stringify([quoteCity.trim().toLowerCase(), shippingMethod, subtotal, promo.trim().toUpperCase()]);
+  const quoteKey = JSON.stringify([quoteCity.trim().toLowerCase(), subtotal, promo.trim().toUpperCase()]);
   const quoteReady = Boolean(quoteCity.trim()) && quotedFor === quoteKey;
-  const shipping = quoteReady ? (freeDeliveryApplied ? 0 : shippingRate) : null;
-  const shippingLabel = quoteLoading ? "Calculating..." : quoteError ? "Unavailable" : !quoteCity.trim() ? "Enter delivery city" : !quoteReady ? "Calculating..." : shipping === 0 ? "Free" : formatPrice(shippingRate);
+  const selectedShippingRate = shippingMethod === "express" ? expressShippingRate : standardShippingRate;
+  const shipping = quoteReady ? selectedShippingRate : null;
+  const shippingLabel = (method: "standard" | "express") => {
+    if (quoteLoading || !quoteReady) return quoteError || (!quoteCity.trim() ? "Enter delivery city" : "Calculating...");
+    const rate = method === "express" ? expressShippingRate : standardShippingRate;
+    return freeDeliveryApplied || rate === 0 ? "Free" : formatPrice(rate);
+  };
   const total = Math.max(0, subtotal + (shipping ?? 0) - discount);
 
   useEffect(() => {
@@ -53,7 +59,7 @@ function CheckoutPage() {
       setQuoteLoading(false);
       return;
     }
-    const requestKey = JSON.stringify([quoteCity.trim().toLowerCase(), shippingMethod, subtotal, promo.trim().toUpperCase()]);
+    const requestKey = JSON.stringify([quoteCity.trim().toLowerCase(), subtotal, promo.trim().toUpperCase()]);
     setQuoteLoading(true);
     setQuoteError("");
     const timer = window.setTimeout(() => {
@@ -66,10 +72,11 @@ function CheckoutPage() {
           const error = await response.json().catch(() => null) as { error?: string } | null;
           throw new Error(error?.error ?? `Delivery fee request failed (${response.status})`);
         }
-        return await response.json() as { shipping: number; discount: number; promoValid: boolean; freeDeliveryApplied: boolean; freeDeliveryThreshold?: number };
+        return await response.json() as { shipping: number; standardShipping: number; expressShipping: number; discount: number; promoValid: boolean; freeDeliveryApplied: boolean; freeDeliveryThreshold?: number };
       }).then((quote) => {
         if (requestId !== quoteRequest.current) return;
-        setShippingRate(quote.shipping);
+        setStandardShippingRate(quote.standardShipping);
+        setExpressShippingRate(quote.expressShipping);
         setFreeDeliveryApplied(quote.freeDeliveryApplied);
         setDiscount(quote.discount);
         setPromoError(promo.trim() && !quote.promoValid ? "That code is not active." : "");
@@ -85,7 +92,7 @@ function CheckoutPage() {
       });
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [quoteCity, lines.length, promo, shippingMethod, subtotal]);
+  }, [quoteCity, lines.length, promo, subtotal]);
 
   useEffect(() => {
     if (document.querySelector("script[data-paystack-inline]")) return;
@@ -265,7 +272,7 @@ function CheckoutPage() {
                         Standard delivery
                       </span>
                       <span className="text-muted-foreground">
-                        {shippingLabel}
+                        {shippingLabel("standard")}
                       </span>
                     </label>
                     <label className="flex cursor-pointer items-center justify-between border border-border bg-surface p-4 text-sm">
@@ -279,7 +286,7 @@ function CheckoutPage() {
                         />
                         Express delivery
                       </span>
-                      <span className="text-muted-foreground">{shippingLabel}</span>
+                      <span className="text-muted-foreground">{shippingLabel("express")}</span>
                     </label>
                   </fieldset>
                   {(quoteLoading || quoteError) && (
@@ -372,7 +379,7 @@ function CheckoutPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Shipping</span>
-                <span>{shipping === null ? shippingLabel : shipping === 0 ? "Free" : formatPrice(shipping)}</span>
+                <span>{shipping === null ? shippingLabel(shippingMethod) : shipping === 0 ? "Free" : formatPrice(shipping)}</span>
               </div>
               <div className="flex justify-between font-display text-lg">
                 <span>Total</span>

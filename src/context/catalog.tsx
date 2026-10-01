@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { products as seedProducts, type CatalogProduct } from "@/data/products";
+import type { CatalogProduct } from "@/data/products";
 
 export type { CatalogProduct } from "@/data/products";
 
@@ -11,11 +11,7 @@ type CatalogContextValue = {
 };
 
 const CatalogContext = createContext<CatalogContextValue | null>(null);
-const initialProducts: CatalogProduct[] = seedProducts.map((product) => ({
-  ...product,
-  stock: 12,
-  status: "Active",
-}));
+const initialProducts: CatalogProduct[] = [];
 
 export function useCatalog() {
   const context = useContext(CatalogContext);
