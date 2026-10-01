@@ -84,7 +84,7 @@ Use `supabase/schema.sql` for Supabase. The files in `database/migrations/` are 
 
 For a new Supabase project, run `supabase/schema.sql` first, then run each SQL migration in `supabase/migrations/` in filename order. For an existing project, run any migration not yet applied before deploying code that depends on it. The stock reservation migration creates the reservation table and atomic order, release, and payment-settlement functions.
 
-Vercel deployments should set a strong random `CRON_SECRET` server environment variable. The configured five-minute Vercel cron calls the protected reservation cleanup endpoint with this secret; expired unpaid orders are cancelled and their reserved quantities are restored. Checkout and payment settlement also run cleanup, so local development does not depend on a cron service.
+Stock reservation cleanup is optional. The app already runs cleanup during checkout and payment settlement, and it can also be triggered manually or by a hosted scheduler if you want to reclaim expired reservations automatically. If you do configure a scheduled cleanup, set a strong random `CRON_SECRET` and call the protected `/api/cron/release-stock-reservations` endpoint with a `Bearer` token.
 
 ### Tables
 
@@ -128,7 +128,7 @@ SUPABASE_STORAGE_BUCKET=product-images
 | `ARKESEL_SENDER_ID` | Optional | SMS sender name; defaults to `BigPeeKicks`. Use a sender ID approved by Arkesel. |
 | `ADMIN_PHONE` | Optional | Ghana number used for admin SMS alerts, for example `0241234567` or `+233241234567`. Can also be set in admin store settings. |
 | `SUPABASE_STORAGE_BUCKET` | Optional | Public product image bucket name; defaults to `product-images`. |
-| `CRON_SECRET` | Required for scheduled Vercel cleanup | Strong random value used to authorize expired-reservation cleanup requests. |
+| `CRON_SECRET` | Optional | Strong random value used to authorize scheduled expired-reservation cleanup requests when you enable a cron or other external scheduler. |
 
 ### Key handling
 
