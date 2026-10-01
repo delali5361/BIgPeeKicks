@@ -17,6 +17,17 @@ export const Route = createFileRoute("/checkout")({
   component: CheckoutPage,
 });
 
+function customerCheckoutError(error: unknown, action: "quote" | "payment") {
+  const details = error instanceof Error ? error.message.toLowerCase() : "";
+  if (details.includes("no longer available") || details.includes("remain for")) {
+    return "Some items in your bag are no longer available in that quantity. Update your bag and try again.";
+  }
+  if (action === "quote") {
+    return "We couldn't calculate the delivery fee right now. Please try again. If this continues, contact the store administrator.";
+  }
+  return "We couldn't start or confirm your payment. Please contact the store administrator for help.";
+}
+
 function CheckoutPage() {
   const { lines, clearCart } = useCart();
   const { buyer } = useAuth();
@@ -85,7 +96,7 @@ function CheckoutPage() {
       }).catch((error: unknown) => {
         if (requestId === quoteRequest.current) {
           setQuotedFor("");
-          setQuoteError(error instanceof Error ? error.message : "Delivery fee could not be updated yet.");
+          setQuoteError(customerCheckoutError(error, "quote"));
         }
       }).finally(() => {
         if (requestId === quoteRequest.current) setQuoteLoading(false);
@@ -132,16 +143,16 @@ function CheckoutPage() {
       });
       const responseText = await response.text();
       let payment: { reference?: string; orderId?: string; total?: number; error?: string };
-      try { payment = JSON.parse(responseText) as typeof payment; } catch { throw new Error(responseText.startsWith("<!doctype") ? "Payment server error. Check the terminal for details." : "Invalid payment server response"); }
+      try { payment = JSON.parse(responseText) as typeof payment; } catch { throw new Error("Payment service returned an unreadable response"); }
       if (!response.ok || !payment.reference || !payment.orderId || typeof payment.total !== "number")
-        throw new Error(payment.error ?? "Unable to start payment");
+        throw new Error(payment.error ?? "Payment could not be started");
       const publicKey = import.meta.env["VITE_PAYSTACK_PUBLIC_KEY"] as string | undefined;
       const paystack = (window as Window & { PaystackPop?: new () => { newTransaction: (options: Record<string, unknown>) => void } }).PaystackPop;
       if (!publicKey || !paystack) throw new Error("Paystack popup is not configured");
       setPaymentStage("waiting");
-      new paystack().newTransaction({ key: publicKey, email: String(form.get("email")), amount: Math.round(payment.total * 100), currency: "GHS", ref: payment.reference, onSuccess: async (result: { reference: string }) => { setPaymentStage("verifying"); const verification = await fetch("/api/payments/paystack/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reference: result.reference }) }); if (!verification.ok) throw new Error("Payment could not be verified"); clearCart(); window.location.assign(`/order-confirmation?orderId=${encodeURIComponent(payment.orderId!)}&reference=${encodeURIComponent(result.reference)}`); }, onCancel: () => setPaymentStage(null) });
+      new paystack().newTransaction({ key: publicKey, email: String(form.get("email")), amount: Math.round(payment.total * 100), currency: "GHS", ref: payment.reference, onSuccess: async (result: { reference: string }) => { setPaymentStage("verifying"); try { const verification = await fetch("/api/payments/paystack/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reference: result.reference }) }); if (!verification.ok) throw new Error("Payment verification was unsuccessful"); clearCart(); window.location.assign(`/order-confirmation?orderId=${encodeURIComponent(payment.orderId!)}&reference=${encodeURIComponent(result.reference)}`); } catch (error) { setPaymentError(customerCheckoutError(error, "payment")); setPaymentStage(null); } }, onCancel: () => setPaymentStage(null) });
     } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : "Unable to start payment");
+      setPaymentError(customerCheckoutError(error, "payment"));
       setPaymentStage(null);
     }
   };

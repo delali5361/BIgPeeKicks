@@ -6,6 +6,7 @@ import { useAuth } from "@/context/auth";
 import { useOrders } from "@/context/orders";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { userFacingError } from "@/lib/user-error";
 
 export const Route = createFileRoute("/admin/returns")({ component: AdminReturnsPage });
 function AdminReturnsPage() {
@@ -16,7 +17,7 @@ function AdminReturnsPage() {
   const decide = async (id: string, returnStatus: "Approved" | "Rejected") => {
     setUpdatingOrder(id);
     try { await updateOrder(id, { returnStatus }); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "Unable to update return"); }
+    catch (error) { toast.error(userFacingError(error, "We couldn't update this return request. Please contact the store administrator.")); }
     finally { setUpdatingOrder(""); }
   };
   const returns = orders.filter((order) => order.returnStatus);

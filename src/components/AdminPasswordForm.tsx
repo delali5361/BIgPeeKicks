@@ -2,6 +2,7 @@ import { Eye, EyeOff, LockKeyhole } from "lucide-react";
 import { useState } from "react";
 import { BusyButton } from "@/components/BusyButton";
 import { toast } from "sonner";
+import { userFacingError } from "@/lib/user-error";
 
 export function AdminPasswordForm() {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -19,8 +20,9 @@ export function AdminPasswordForm() {
       setCurrentPassword("");
       setNewPassword("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Password change failed.");
-      toast.error("Password could not be changed");
+      const friendlyMessage = userFacingError(error, "We couldn't change the password. Please contact the store administrator.");
+      setMessage(friendlyMessage);
+      toast.error(friendlyMessage);
     } finally {
       setSaving(false);
     }

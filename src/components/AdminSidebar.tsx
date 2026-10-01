@@ -26,7 +26,7 @@ export function AdminSidebar() {
   const handleLogout = async () => {
     setLoggingOut(true);
     try { await logout(); }
-    catch { toast.error("Could not log out. Please try again."); }
+    catch { toast.error("We couldn't log out. Please try again or contact the store administrator."); }
     finally { setLoggingOut(false); }
   };
 

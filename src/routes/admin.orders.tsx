@@ -7,6 +7,7 @@ import { useOrders, type OrderStatus } from "@/context/orders";
 import { formatPrice } from "@/lib/currency";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { userFacingError } from "@/lib/user-error";
 
 export const Route = createFileRoute("/admin/orders")({ component: AdminOrdersPage });
 
@@ -17,7 +18,7 @@ function AdminOrdersPage() {
   const changeStatus = async (id: string, status: OrderStatus) => {
     setUpdatingOrder(id);
     try { await updateOrder(id, { status }); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "Unable to update order"); }
+    catch (error) { toast.error(userFacingError(error, "We couldn't update this order. Please contact the store administrator.")); }
     finally { setUpdatingOrder(""); }
   };
   useEffect(() => { if (isAdmin) void reloadOrders().catch(() => undefined); }, [isAdmin, reloadOrders]);

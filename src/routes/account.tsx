@@ -6,6 +6,7 @@ import { useAuth } from "@/context/auth";
 import { formatPrice } from "@/lib/currency";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { userFacingError } from "@/lib/user-error";
 
 export const Route = createFileRoute("/account")({ component: AccountPage });
 
@@ -20,7 +21,7 @@ function AccountPage() {
   const submitReturn = async (id: string) => {
     setRequestingReturn(id);
     try { await requestReturn(id); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "Unable to request return"); }
+    catch (error) { toast.error(userFacingError(error, "We couldn't submit your return request. Please contact the store administrator.")); }
     finally { setRequestingReturn(""); }
   };
   return (

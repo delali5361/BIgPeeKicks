@@ -7,6 +7,7 @@ import { useAuth } from "@/context/auth";
 import { AdminPasswordForm } from "@/components/AdminPasswordForm";
 import { BusyButton } from "@/components/BusyButton";
 import { toast } from "sonner";
+import { userFacingError } from "@/lib/user-error";
 
 type Settings = {
   storeName: string;
@@ -36,7 +37,7 @@ function AdminSettingsPage() {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
-  useEffect(() => { if (!isAdmin) return; void Promise.all([fetch("/api/admin/settings"), fetch("/api/admin/shipping-rates")]).then(async ([settingsResponse, ratesResponse]) => { if (!settingsResponse.ok || !ratesResponse.ok) throw new Error(`Settings load failed (${settingsResponse.status}/${ratesResponse.status})`); setSettings(await settingsResponse.json() as Settings); setShippingRates(await ratesResponse.json() as ShippingRate[]); }).catch((error) => toast.error(error instanceof Error ? error.message : "Settings could not be loaded")); }, [isAdmin]);
+  useEffect(() => { if (!isAdmin) return; void Promise.all([fetch("/api/admin/settings"), fetch("/api/admin/shipping-rates")]).then(async ([settingsResponse, ratesResponse]) => { if (!settingsResponse.ok || !ratesResponse.ok) throw new Error("Settings request failed"); setSettings(await settingsResponse.json() as Settings); setShippingRates(await ratesResponse.json() as ShippingRate[]); }).catch((error) => toast.error(userFacingError(error, "We couldn't load settings. Please contact the store administrator."))); }, [isAdmin]);
   if (!isAdmin) return <AdminGuard />;
   const update = (key: keyof Settings, value: string) =>
     setSettings((current) => ({ ...current, [key]: value }));
@@ -54,11 +55,11 @@ function AdminSettingsPage() {
     setSaving(true);
     try {
       const [settingsResponse, ratesResponse] = await Promise.all([fetch("/api/admin/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(settings) }), fetch("/api/admin/shipping-rates", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(shippingRates) })]);
-      if (!settingsResponse.ok || !ratesResponse.ok) throw new Error(`Settings save failed (${settingsResponse.status}/${ratesResponse.status})`);
+      if (!settingsResponse.ok || !ratesResponse.ok) throw new Error("Settings save failed");
       setSaved(true);
       toast.success("Settings saved");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Settings could not be saved");
+      toast.error(userFacingError(error, "We couldn't save settings. Please contact the store administrator."));
     } finally {
       setSaving(false);
     }

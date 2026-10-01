@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { Product } from "@/data/products";
 import { toast } from "sonner";
 import { BusyButton } from "@/components/BusyButton";
+import { userFacingError } from "@/lib/user-error";
 
 type AddProductModalProps = {
   open: boolean;
@@ -64,7 +65,7 @@ export function AddProductModal({ open, onClose, onAdd }: AddProductModalProps) 
       createdAt: new Date().toISOString().slice(0, 10),
       stock: formData.stock,
       status: formData.status,
-    }); } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to save product"); return; } finally { setSaving(false); }
+    }); } catch (error) { toast.error(userFacingError(error, "We couldn't save this product. Please contact the store administrator.")); return; } finally { setSaving(false); }
     toast.success(`${formData.name} added to inventory`);
     setFormData({
       name: "",

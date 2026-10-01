@@ -8,6 +8,7 @@ import { useAuth } from "@/context/auth";
 import { useCatalog, type CatalogProduct } from "@/context/catalog";
 import { formatPrice } from "@/lib/currency";
 import { toast } from "sonner";
+import { userFacingError } from "@/lib/user-error";
 
 const categories: Array<"All" | Product["category"]> = ["All", "Shoes", "Sneakers", "Slippers"];
 
@@ -52,7 +53,7 @@ function InventoryPage() {
       toast.success(`${sizeEditor.name} sizes updated`);
       setSizeEditor(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to update sizes");
+      toast.error(userFacingError(error, "We couldn't update product sizes. Please contact the store administrator."));
     } finally {
       setBusyAction("");
     }
@@ -62,7 +63,7 @@ function InventoryPage() {
     try {
       await updateProduct(id, changes);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to update product");
+      toast.error(userFacingError(error, "We couldn't update this product. Please contact the store administrator."));
     } finally {
       setBusyAction("");
     }
@@ -201,7 +202,7 @@ function InventoryPage() {
         <p className="py-12 text-center text-muted-foreground">No products match these filters.</p>
       )}
       {sizeEditor && <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/75 px-5 backdrop-blur-sm"><div className="w-full max-w-md border border-border bg-surface p-6 shadow-deep"><h2 className="font-display text-lg">Edit EU sizes</h2><p className="mt-2 text-sm text-muted-foreground">{sizeEditor.name}</p><input autoFocus disabled={busyAction === `sizes:${sizeEditor.id}`} value={sizeValue} onChange={(event) => setSizeValue(event.target.value)} placeholder="40, 41, 42, 43" className="mt-5 w-full rounded-md border border-border bg-background px-4 py-3 text-sm outline-none focus:border-primary" /><div className="mt-5 flex justify-end gap-3"><button type="button" disabled={Boolean(busyAction)} onClick={() => setSizeEditor(null)} className="rounded-md border border-border px-4 py-2 text-xs text-muted-foreground disabled:opacity-50">Cancel</button><button type="button" disabled={Boolean(busyAction)} onClick={saveSizes} className="ember-fill inline-flex items-center gap-2 rounded-md px-4 py-2 font-display text-xs tracking-widest disabled:opacity-50">{busyAction === `sizes:${sizeEditor.id}` && <LoaderCircle className="size-3.5 animate-spin" />}Save sizes</button></div></div></div>}
-      {deleteTarget && <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/75 px-5 backdrop-blur-sm"><div className="w-full max-w-md border border-border bg-surface p-6 shadow-deep"><h2 className="font-display text-lg">Delete product?</h2><p className="mt-2 text-sm text-muted-foreground">This will remove {deleteTarget.name} from inventory.</p><div className="mt-5 flex justify-end gap-3"><button type="button" disabled={Boolean(busyAction)} onClick={() => setDeleteTarget(null)} className="rounded-md border border-border px-4 py-2 text-xs text-muted-foreground disabled:opacity-50">Cancel</button><button type="button" disabled={Boolean(busyAction)} onClick={() => { void (async () => { setBusyAction(`delete:${deleteTarget.id}`); try { await removeProduct(deleteTarget.id); toast.success(`${deleteTarget.name} deleted`); setDeleteTarget(null); } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to delete product"); } finally { setBusyAction(""); } })(); }} className="inline-flex items-center gap-2 rounded-md border border-red-400 px-4 py-2 text-xs text-red-400 disabled:opacity-50">{busyAction === `delete:${deleteTarget.id}` && <LoaderCircle className="size-3.5 animate-spin" />}Delete product</button></div></div></div>}
+      {deleteTarget && <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/75 px-5 backdrop-blur-sm"><div className="w-full max-w-md border border-border bg-surface p-6 shadow-deep"><h2 className="font-display text-lg">Delete product?</h2><p className="mt-2 text-sm text-muted-foreground">This will remove {deleteTarget.name} from inventory.</p><div className="mt-5 flex justify-end gap-3"><button type="button" disabled={Boolean(busyAction)} onClick={() => setDeleteTarget(null)} className="rounded-md border border-border px-4 py-2 text-xs text-muted-foreground disabled:opacity-50">Cancel</button><button type="button" disabled={Boolean(busyAction)} onClick={() => { void (async () => { setBusyAction(`delete:${deleteTarget.id}`); try { await removeProduct(deleteTarget.id); toast.success(`${deleteTarget.name} deleted`); setDeleteTarget(null); } catch (error) { toast.error(userFacingError(error, "We couldn't delete this product. Please contact the store administrator.")); } finally { setBusyAction(""); } })(); }} className="inline-flex items-center gap-2 rounded-md border border-red-400 px-4 py-2 text-xs text-red-400 disabled:opacity-50">{busyAction === `delete:${deleteTarget.id}` && <LoaderCircle className="size-3.5 animate-spin" />}Delete product</button></div></div></div>}
       <AddProductModal open={open} onClose={() => setOpen(false)} onAdd={addProduct} />
     </div>
   );
